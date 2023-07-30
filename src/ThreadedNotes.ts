@@ -1,7 +1,21 @@
+/*
+ * Processes notes created with the Unique Note core plugin using a special
+ * note title/name syntax.
+ *
+ * ## Links
+ *
+ * The first section of the file name after the unique note prefix is a comma
+ * separated list of "root" notes to link in the footer of the new note.
+ *
+ * ## Alias (optional)
+ *
+ * Anything after a "$" in the file name will be automatically inserted as an
+ * alias for the file.
+ */
 import { TAbstractFile, TFile } from "obsidian";
 import type { Obsidianrc } from "./Obsidianrc";
 
-const UNIQUE_NOTE_PATTERN = /^\d{14} - (.+)$/;
+const UNIQUE_NOTE_PATTERN = /^\d{14} - (.+)$/; // "YYYYMMDDHHmmss -"
 const THREAD_SEPERATOR = ",";
 const ALIAS_SEPERATOR = "$";
 const FOOTER_PATTERN = /\*\*\*\n(\[\[.+\]\] ?)+$/m;
