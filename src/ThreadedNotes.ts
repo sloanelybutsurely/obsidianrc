@@ -1,86 +1,103 @@
-import type { TAbstractFile, TFile } from "obsidian";
+import { TAbstractFile, TFile } from "obsidian";
 import type { Obsidianrc } from "./Obsidianrc";
 
-const UNIQUE_NOTE_PATTERN = /^\d{14} - (.+)(?:\.md)$/;
+const UNIQUE_NOTE_PATTERN = /^\d{14} - (.+)$/;
+const THREAD_SEPERATOR = ",";
+const ALIAS_SEPERATOR = "$";
+const FOOTER_PATTERN = /\*\*\*\n(\[\[.+\]\] ?)+$/m;
+
+interface UniqueNoteData {
+  threads: string[];
+  alias: string | null;
+}
 
 export class ThreadedNotes {
   constructor(private plugin: Obsidianrc) {
     this.plugin.registerEvent(
-      plugin.app.vault.on("create", this.handleCreate, this),
+      plugin.app.vault.on("create", this.autocommand, this),
     );
     this.plugin.registerEvent(
-      plugin.app.vault.on("rename", this.handleRename, this),
+      plugin.app.vault.on("rename", this.autocommand, this),
     );
   }
 
-  private async handleCreate(file: TAbstractFile) {
-    if (this.isStitch(file)) {
-      const thread = await this.maybeCreateThreadForStitch(file);
-      this.plugin.app.vault.append(
-        file as TFile,
-        `\n\n***\n${this.plugin.app.fileManager.generateMarkdownLink(
-          thread as TFile,
-          file.path,
-        )}`,
-      );
-    }
-  }
-
-  private async handleRename(file: TAbstractFile, oldPath: string) {
-    const [oldFile] = oldPath.split("/").reverse();
-
-    if (this.isStitch(oldFile)) {
-      const oldThread = await this.maybeCreateThreadForStitch(oldFile);
-      const oldFooter = this.footer(oldThread, oldPath);
-      if (this.isStitch(file)) {
-        // rename old stitch
-        const thread = await this.maybeCreateThreadForStitch(file);
-        this.plugin.app.vault.process(file as TFile, (data: string) => {
-          const newFooter = this.footer(thread, file.path);
-          if (data.includes(oldFooter)) {
-            return data.replace(oldFooter, newFooter);
-          } else {
-            return data.concat("\n\n", newFooter);
-          }
-        });
-      }
-    } else {
-      if (this.isStitch(file)) {
-        // create new stitch
-        const thread = await this.maybeCreateThreadForStitch(file);
-        this.plugin.app.vault.append(
-          file as TFile,
-          `\n\n${this.footer(thread as TFile, file.path)}`,
-        );
+  private async autocommand(absFile: TAbstractFile, oldPath?: string) {
+    const file = this.toTFile(absFile);
+    const oldFile = oldPath ? this.toTFile(oldPath) : null;
+    const oldData = oldFile ? this.uniqueNoteData(oldFile) : null;
+    if (file && this.isUniqueNote(file)) {
+      const data = this.uniqueNoteData(file);
+      if (data) {
+        this.replaceOrAppendFooter(file, data);
+        this.updateAliases(file, data, oldData);
       }
     }
   }
 
-  private async maybeCreateThreadForStitch(
-    file: TAbstractFile | TFile | string,
+  private toTFile(input: TFile | TAbstractFile | string | null): TFile | null {
+    if (!input) return null;
+    if (input instanceof TFile) return input;
+    if (input instanceof TAbstractFile) return this.unabstractFile(input);
+    if (typeof input === "string") return this.pathToTFile(input);
+    return null;
+  }
+
+  private pathToTFile(path: string): TFile | null {
+    const abstractFile = this.plugin.app.vault.getAbstractFileByPath(path);
+    if (abstractFile) return this.unabstractFile(abstractFile);
+
+    const file: TFile = new (TFile as any)(this.plugin.app.vault, path);
+
+    return file;
+  }
+
+  private unabstractFile(file: TAbstractFile): TFile | null {
+    return new (TFile as any)(this.plugin.app.vault, file.path);
+  }
+
+  private isUniqueNote(file: TFile | null) {
+    if (!file) return false;
+    return UNIQUE_NOTE_PATTERN.test(file.basename);
+  }
+
+  private uniqueNoteData({ basename: name }: TFile): UniqueNoteData | null {
+    const input = name.match(UNIQUE_NOTE_PATTERN)?.[1];
+    if (!input) return null;
+
+    const [threadsString, alias] = input.split(ALIAS_SEPERATOR);
+    return {
+      threads: threadsString.split(THREAD_SEPERATOR).map((t) => t.trim()),
+      alias: alias ? alias.trim() : null,
+    };
+  }
+
+  private replaceOrAppendFooter(file: TFile, data: UniqueNoteData) {
+    this.plugin.app.vault.process(file, (contents) => {
+      const footer = this.footer(data);
+      if (FOOTER_PATTERN.test(contents)) {
+        return contents.replace(FOOTER_PATTERN, footer);
+      } else {
+        return contents.concat("\n\n", footer);
+      }
+    });
+  }
+
+  private footer({ threads }: UniqueNoteData) {
+    return `***\n${threads.map((t) => `[[${t}]]`).join(" ")}`;
+  }
+
+  private async updateAliases(
+    file: TFile,
+    { alias }: UniqueNoteData,
+    old: UniqueNoteData | null,
   ) {
-    const path = `${this.thread(file)}.md`;
-    return (
-      this.plugin.app.vault.getAbstractFileByPath(path) ||
-      this.plugin.app.vault.create(path, "")
-    );
-  }
-
-  private isStitch(file: TAbstractFile | string) {
-    const name = typeof file === "string" ? file : file.name;
-    return UNIQUE_NOTE_PATTERN.test(name);
-  }
-
-  private thread(file: TAbstractFile | string) {
-    const name = typeof file === "string" ? file : file.name;
-    const matches = name.match(UNIQUE_NOTE_PATTERN);
-    return matches?.[1];
-  }
-
-  private footer(file: TAbstractFile | TFile, source: string) {
-    return `***\n${this.plugin.app.fileManager.generateMarkdownLink(
-      file as TFile,
-      source,
-    )}`;
+    if (!alias) return;
+    return this.plugin.app.fileManager.processFrontMatter(file, (fm) => {
+      if (!fm) return;
+      const aliases = new Set(fm.aliases || []);
+      aliases.add(alias);
+      if (old && old.alias) aliases.delete(old.alias);
+      fm.aliases = [...aliases.values()];
+    });
   }
 }
