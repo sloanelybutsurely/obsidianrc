@@ -109,8 +109,8 @@ export class ThreadedNotes {
     return this.plugin.app.fileManager.processFrontMatter(file, (fm) => {
       if (!fm) return;
       const aliases = new Set(fm.aliases || []);
-      aliases.add(alias);
       if (old && old.alias) aliases.delete(old.alias);
+      aliases.add(alias);
       fm.aliases = [...aliases.values()];
     });
   }
