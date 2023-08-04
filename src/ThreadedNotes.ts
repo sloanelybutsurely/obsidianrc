@@ -18,7 +18,6 @@ import type { Obsidianrc } from "./Obsidianrc";
 const UNIQUE_NOTE_PATTERN = /^\d{14} - (.+)$/; // "YYYYMMDDHHmmss -"
 const THREAD_SEPERATOR = ",";
 const ALIAS_SEPERATOR = "$";
-const FOOTER_PATTERN = /\*\*\*\n(\[\[.+\]\] ?)+$/m;
 
 interface UniqueNoteData {
   threads: string[];
@@ -42,7 +41,7 @@ export class ThreadedNotes {
     if (file && this.isUniqueNote(file)) {
       const data = this.uniqueNoteData(file);
       if (data) {
-        this.replaceOrAppendFooter(file, data);
+        this.replaceThreads(file, data);
         this.updateAliases(file, data, oldData);
       }
     }
@@ -85,19 +84,10 @@ export class ThreadedNotes {
     };
   }
 
-  private replaceOrAppendFooter(file: TFile, data: UniqueNoteData) {
-    this.plugin.app.vault.process(file, (contents) => {
-      const footer = this.footer(data);
-      if (FOOTER_PATTERN.test(contents)) {
-        return contents.replace(FOOTER_PATTERN, footer);
-      } else {
-        return contents.concat("\n\n", footer);
-      }
+  private replaceThreads(file: TFile, { threads }: UniqueNoteData) {
+    this.plugin.app.fileManager.processFrontMatter(file, (fm) => {
+      fm.threads = threads;
     });
-  }
-
-  private footer({ threads }: UniqueNoteData) {
-    return `***\n${threads.map((t) => `[[${t}]]`).join(" ")}`;
   }
 
   private async updateAliases(
