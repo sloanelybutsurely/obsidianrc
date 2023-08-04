@@ -86,7 +86,7 @@ export class ThreadedNotes {
 
   private replaceThreads(file: TFile, { threads }: UniqueNoteData) {
     this.plugin.app.fileManager.processFrontMatter(file, (fm) => {
-      fm.threads = threads;
+      fm.threads = threads.map((t) => `[[${t}]]`);
     });
   }
 
